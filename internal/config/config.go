@@ -24,10 +24,13 @@ type AppConfig struct {
 
 	Log struct {
 		Level       string `mapstructure:"level"`
+		Output      string `mapstructure:"output"`
+		Format      string `mapstructure:"format"`
 		Filename    string `mapstructure:"filename"`
 		MaxBytes    int    `mapstructure:"max_bytes"`
 		BackupCount int    `mapstructure:"backup_count"`
-		Format      string `mapstructure:"format"`
+		MaxAgeDays  int    `mapstructure:"max_age_days"`
+		Compress    bool   `mapstructure:"compress"`
 	} `mapstructure:"log"`
 }
 

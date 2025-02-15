@@ -11,8 +11,12 @@ mattermost:
   reconnect_interval: 5
 
 log:
-  level: "INFO"
-  filename: "logs/app.log"
-  max_bytes: 10485760
-  backup_count: 5
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  level: "INFO"                    # DEBUG / INFO / WARN / ERROR
+  output: "both"                   # "stdout", "file", "both"
+  format: "json"                   # "console" 或 "json"
+  filename: "logs/app.log"         # 日志文件名 (仅当output=file/both时生效)
+  max_bytes: 10485760              # 10 MB
+  backup_count: 5                  # 旧文件保留个数
+  max_age_days: 7                  # 7天
+  compress: false                  # 是否压缩归档
+
