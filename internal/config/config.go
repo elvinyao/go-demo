@@ -56,6 +56,16 @@ type AppConfig struct {
 	Storage struct {
 		Path string `mapstructure:"path"`
 	} `mapstructure:"storage"`
+
+	// Reporting configuration
+	Reporting struct {
+		Interval    int      `mapstructure:"interval"`
+		ReportTypes []string `mapstructure:"report_types"`
+		Confluence  struct {
+			PageID   string `mapstructure:"page_id"`
+			Template string `mapstructure:"template"`
+		} `mapstructure:"confluence"`
+	} `mapstructure:"reporting"`
 }
 
 // LoadConfig loads configuration from the specified file path

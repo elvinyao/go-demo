@@ -33,3 +33,12 @@ log:
 
 storage:
   path: "task_storage"
+
+reporting:
+  interval: 30
+  report_types:
+    - "confluence"
+    - "mattermost"
+  confluence:
+    page_id: "789012"
+    template: "task_results_template"

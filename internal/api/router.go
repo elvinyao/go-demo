@@ -7,28 +7,31 @@ import (
 	"my-scheduler-go/internal/models"
 	"my-scheduler-go/internal/repository"
 	"my-scheduler-go/internal/scheduler"
+	"my-scheduler-go/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // API represents the API handler
 type API struct {
-	repo      repository.TaskRepository
-	scheduler *scheduler.SchedulerService
+	repo             repository.TaskRepository
+	scheduler        *scheduler.SchedulerService
+	reportingService *service.ResultReportingService
 }
 
 // NewAPI creates a new API handler
-func NewAPI(repo repository.TaskRepository, scheduler *scheduler.SchedulerService) *API {
+func NewAPI(repo repository.TaskRepository, scheduler *scheduler.SchedulerService, reportingService *service.ResultReportingService) *API {
 	return &API{
-		repo:      repo,
-		scheduler: scheduler,
+		repo:             repo,
+		scheduler:        scheduler,
+		reportingService: reportingService,
 	}
 }
 
 // SetupRouter sets up the API routes
-func SetupRouter(repo repository.TaskRepository, scheduler *scheduler.SchedulerService) *gin.Engine {
+func SetupRouter(repo repository.TaskRepository, scheduler *scheduler.SchedulerService, reportingService *service.ResultReportingService) *gin.Engine {
 	r := gin.Default()
-	api := NewAPI(repo, scheduler)
+	api := NewAPI(repo, scheduler, reportingService)
 
 	// Task management endpoints
 	r.GET("/tasks", api.GetAllTasks)
@@ -41,6 +44,12 @@ func SetupRouter(repo repository.TaskRepository, scheduler *scheduler.SchedulerS
 
 	// Task history endpoint
 	r.GET("/task_history", api.GetTaskHistory)
+
+	// Reporting endpoints
+	r.GET("/reports/:type", api.GenerateReport)
+
+	// Add a new endpoint for immediate reporting
+	r.POST("/tasks/:id/report", api.GenerateTaskReport)
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
@@ -193,5 +202,60 @@ func (api *API) GetTaskHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"total_count": len(tasks),
 		"data":        tasks,
+	})
+}
+
+// GenerateReport generates a report on demand
+func (api *API) GenerateReport(c *gin.Context) {
+	reportType := c.Param("type")
+
+	// Generate report
+	reportData, err := api.reportingService.GenerateReport(reportType)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	// Return report data
+	c.JSON(http.StatusOK, gin.H{
+		"report_type":  reportType,
+		"generated_at": time.Now(),
+		"data":         reportData,
+	})
+}
+
+// GenerateTaskReport generates a report for a specific task
+func (api *API) GenerateTaskReport(c *gin.Context) {
+	id := c.Param("id")
+	reportType := c.Query("type")
+	if reportType == "" {
+		reportType = "confluence" // Default to Confluence
+	}
+
+	// Check if task exists
+	_, err := api.repo.GetTaskByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Task not found",
+		})
+		return
+	}
+
+	// Get the appropriate reporting strategy
+	reportData, err := api.reportingService.GenerateReport(reportType)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"task_id":      id,
+		"report_type":  reportType,
+		"generated_at": time.Now(),
+		"data":         reportData,
 	})
 }

@@ -14,6 +14,7 @@ import (
 	"my-scheduler-go/internal/models"
 	"my-scheduler-go/internal/repository"
 	"my-scheduler-go/internal/scheduler"
+	"my-scheduler-go/internal/service"
 )
 
 func main() {
@@ -46,13 +47,18 @@ func main() {
 	schedService.Start()
 	log.Println("[main] Scheduler service started")
 
-	// 6. Create example tasks if in development mode
+	// 6. Initialize and start result reporting service
+	reportingService := service.NewResultReportingService(repo, appConfig)
+	reportingService.Start()
+	log.Println("[main] Result reporting service started")
+
+	// 7. Create example tasks if in development mode
 	if appConfig.Environment == "development" {
 		createExampleTasks(schedService)
 	}
 
-	// 7. Setup HTTP server with API routes
-	router := api.SetupRouter(repo, schedService)
+	// 8. Setup HTTP server with API routes
+	router := api.SetupRouter(repo, schedService, reportingService)
 
 	// Create HTTP server
 	server := &http.Server{
@@ -60,7 +66,7 @@ func main() {
 		Handler: router,
 	}
 
-	// 8. Start HTTP server in a separate goroutine
+	// 9. Start HTTP server in a separate goroutine
 	go func() {
 		log.Printf("[main] HTTP server listening on %s\n", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -68,15 +74,19 @@ func main() {
 		}
 	}()
 
-	// 9. Setup graceful shutdown
+	// 10. Setup graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("[main] Shutdown signal received, stopping services...")
 
-	// 10. Shutdown services gracefully
+	// 11. Shutdown services gracefully
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Stop reporting service
+	reportingService.Stop()
+	log.Println("[main] Result reporting service stopped")
 
 	// Stop scheduler
 	schedService.Stop()
