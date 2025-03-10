@@ -1,204 +1,240 @@
-# APScheduler任务调度管理系统
+# APScheduler任务调度管理系统 - 技术实现文档
 
-## 1. 项目概述
+## 1. 系统概述
 
-APScheduler任务调度管理系统是一个基于gin构建的高效任务调度与管理平台。该系统采用领域驱动设计(DDD)架构，通过依赖注入(DI)实现模块间的低耦合，具备任务创建、调度、执行、结果处理与外部系统集成等完整功能。
+APScheduler任务调度管理系统是一个基于Go语言和Gin框架构建的任务调度与管理平台。系统采用模块化设计，支持多种任务类型和报告格式，可以与Jira、Confluence和Mattermost等外部系统集成。
 
-### 核心特性
+### 1.1 核心功能
 
-- **灵活的任务调度**：支持即时任务(IMMEDIATE)和基于cron表达式的定时任务(SCHEDULED)
-- **强大的任务管理**：包含优先级队列、依赖管理、超时处理、重试机制
-- **外部系统集成**：支持与Jira、Confluence等系统对接，实现数据处理自动化
-- **结果汇总与报告**：任务执行结果可自动汇总并更新至Confluence页面
-- **RESTful API接口**：提供完整的任务管理接口，支持查询、过滤、监控
-- **高可扩展性**：模块化设计，便于扩展新的任务类型和外部系统集成
+- **任务调度管理**
+  - 支持即时任务(IMMEDIATE)和定时任务(SCHEDULED)
+  - 基于优先级的任务队列管理
+  - 任务依赖关系处理
+  - 任务超时控制和重试机制
 
-## 2. 系统架构
+- **结果报告生成**
+  - 支持多种报告格式（Confluence/Mattermost）
+  - 定时自动生成报告
+  - 支持按需生成报告
+  - 自定义报告模板
 
-系统基于清晰的分层架构设计：
+- **外部系统集成**
+  - Jira任务同步
+  - Confluence页面更新
+  - Mattermost消息通知
 
-### 架构分层
+- **RESTful API**
+  - 完整的任务生命周期管理
+  - 报告生成和查询接口
+  - 健康检查接口
 
-1. **表示层**（gin应用）
-   - 提供RESTful API接口，处理用户交互
+## 2. 技术架构
 
-2. **应用层**（Application）
-   - 编排核心业务流程
-   - 协调领域服务与基础设施
-   - 任务调度服务
+### 2.1 技术栈
 
-3. **领域层**（Domain）
-   - 核心业务规则与实体模型
-   - 领域服务（Jira处理、Confluence处理等）
+- **语言**: Go 1.23.1+
+- **Web框架**: Gin
+- **配置管理**: Viper
+- **定时调度**: robfig/cron v3
+- **日志管理**: 标准库log（可扩展）
 
-4. **基础设施层**（Infrastructure）
-   - 外部系统集成（Jira API、Confluence API）
-   - 配置管理、日志服务
-   - 持久化实现
-
-### 核心组件
-
-- **任务调度器**（SchedulerService）：系统核心，协调各管理器完成任务调度
-- **任务执行器**（TaskExecutor）：执行具体任务，调用相应领域服务
-- **任务仓库**（TaskRepository）：管理任务的存储和检索
-- **结果报告服务**（ResultReportingService）：处理任务结果并生成报告
-
-## 3. 功能详解
-
-### 3.1 任务调度与执行
-
-#### 任务类型
-
-- **定时任务（SCHEDULED）**：通过cron表达式配置执行时间
-- **即时任务（IMMEDIATE）**：创建后立即加入执行队列
-
-#### 任务状态流转
+### 2.2 系统架构
 
 ```
-PENDING -> QUEUED -> RUNNING -> DONE/FAILED
-             ^                    |
-             |                    v
-             +---- RETRY <---- TIMEOUT
+├── main.go                 # 应用入口
+└── internal/              
+    ├── api/               # API层
+    │   └── router.go      # 路由定义
+    ├── config/            # 配置管理
+    │   └── config.go      # 配置结构
+    ├── models/            # 数据模型
+    │   ├── models.go      # 基础模型
+    │   └── task.go        # 任务模型
+    ├── repository/        # 数据访问层
+    │   └── task_repository.go  # 任务存储
+    ├── scheduler/         # 调度层
+    │   ├── scheduler.go   # 调度器
+    │   └── executor.go    # 执行器
+    ├── service/          # 服务层
+    │   ├── confluence_service.go   # Confluence服务
+    │   ├── jira_service.go        # Jira服务
+    │   ├── mattermost_service.go  # Mattermost服务
+    │   └── result_reporting_service.go  # 报告服务
+    └── mattermost/       # Mattermost集成
+        ├── connection.go  # 连接管理
+        └── event_listener.go  # 事件监听
 ```
 
-#### 任务优先级
+### 2.3 核心组件
 
-- HIGH：高优先级任务，优先执行
-- MEDIUM：中等优先级（默认）
-- LOW：低优先级任务
+1. **TaskRepository**
+   - 任务数据的CRUD操作
+   - 支持状态和标签过滤
+   - 当前实现为内存存储，可扩展其他存储方式
 
-#### 任务依赖管理
+2. **SchedulerService**
+   - 任务调度核心
+   - 支持定时和即时任务
+   - 任务优先级队列
+   - 并发控制
 
-- 支持任务间依赖关系配置
-- 依赖任务完成后，才会执行后续任务
+3. **TaskExecutor**
+   - 任务执行引擎
+   - 支持多种任务类型
+   - 错误处理和重试机制
 
-#### 任务超时与重试
+4. **ResultReportingService**
+   - 报告生成和发布
+   - 支持多种报告策略
+   - 定时和按需报告生成
 
-- 支持配置任务执行超时时间
-- 支持自定义重试策略（最大重试次数、重试延迟、退避因子）
+## 3. API接口规范
 
-### 3.2 外部系统集成
+### 3.1 任务管理接口
 
-#### Jira集成
-
-- 支持根据项目或根问题提取Issue信息
-- 支持Issue状态更新、字段修改
-- 支持生成Excel格式报表导出
-
-#### Confluence集成
-
-- 支持任务结果汇总至Confluence页面
-- 支持表格形式更新与展示
-- 支持自动创建/更新内容页面
-
-#### 未来可扩展集成
-
-- Mattermost通知（已有基础实现）
-- 邮件通知
-- 其他第三方系统API
-
-### 3.3 API接口
-
-| 端点 | 方法 | 描述 |
-|------|------|------|
-| `/tasks` | GET | 获取所有任务列表 |
-| `/tasks/status/{status}` | GET | 根据状态过滤任务 |
-| `/task_history` | GET | 获取已执行完成的任务历史 |
-
-## 4. 技术规范
-
-### 4.1 开发环境
-
-- **Golang版本**：1.23.1
-- **主要依赖**：
-  - cron 0.115.8+
-
-### 4.2 代码组织结构
-
+#### 获取任务列表
+```http
+GET /tasks
+Response: {
+    "total_count": int,
+    "data": [Task]
+}
 ```
 
+#### 按状态获取任务
+```http
+GET /tasks/status/{status}
+Response: {
+    "total_count": int,
+    "data": [Task]
+}
 ```
 
-### 4.3 数据模型
-
-#### Task模型
-
-```python
-class Task(BaseModel):
-    id: UUID                            # 任务唯一标识
-    name: str                           # 任务名称
-    task_type: TaskType                 # 任务类型(SCHEDULED/IMMEDIATE)
-    cron_expr: Optional[str]            # cron表达式(定时任务)
-    status: TaskStatus                  # 当前状态
-    created_at: datetime                # 创建时间
-    updated_at: datetime                # 更新时间
-    priority: TaskPriority              # 优先级(HIGH/MEDIUM/LOW)
-    metadata: Dict[str, Any]            # 元数据
-    tags: List[str]                     # 标签列表
-    owner: Optional[str]                # 创建者
-    dependencies: List[UUID]            # 依赖任务ID列表
-    timeout_seconds: Optional[int]      # 超时时间(秒)
-    retry_policy: Optional[RetryPolicy] # 重试策略
-    parameters: Dict[str, Any]          # 任务参数
+#### 按标签获取任务
+```http
+GET /tasks/tags/{tag}
+Response: {
+    "total_count": int,
+    "data": [Task]
+}
 ```
 
-### 4.4 配置项说明
+#### 获取单个任务
+```http
+GET /tasks/{id}
+Response: Task
+```
 
-config.yaml文件包含以下配置项：
+#### 创建任务
+```http
+POST /tasks
+Request: Task
+Response: Task
+```
 
-#### Confluence配置
+#### 更新任务
+```http
+PUT /tasks/{id}
+Request: Task
+Response: Task
+```
 
+#### 删除任务
+```http
+DELETE /tasks/{id}
+Response: {
+    "message": "Task deleted successfully"
+}
+```
+
+### 3.2 报告接口
+
+#### 生成报告
+```http
+GET /reports/{type}
+Response: {
+    "report_type": string,
+    "generated_at": timestamp,
+    "data": string
+}
+```
+
+#### 生成任务报告
+```http
+POST /tasks/{id}/report?type={report_type}
+Response: {
+    "task_id": string,
+    "report_type": string,
+    "generated_at": timestamp,
+    "data": string
+}
+```
+
+## 4. 数据模型
+
+### 4.1 Task模型
+```go
+type Task struct {
+    ID              string                 
+    Name            string                 
+    TaskType        TaskType              
+    CronExpr        string                
+    Status          TaskStatus            
+    CreatedAt       time.Time             
+    UpdatedAt       time.Time             
+    Priority        TaskPriority          
+    Metadata        map[string]interface{}
+    Tags            []string              
+    Owner           string                
+    Dependencies    []string              
+    TimeoutSeconds  int                   
+    RetryPolicy     *RetryPolicy          
+    Parameters      map[string]interface{}
+    ExecutionResult map[string]interface{}
+}
+```
+
+### 4.2 RetryPolicy模型
+```go
+type RetryPolicy struct {
+    MaxRetries    int           
+    RetryDelay    time.Duration 
+    BackoffFactor float64       
+}
+```
+
+## 5. 配置说明
+
+### 5.1 配置文件结构
 ```yaml
+environment: "development"
+
+scheduler:
+  poll_interval: 30
+  concurrency: 5
+  coalesce: false
+  max_instances: 5
+
+jira:
+  url: "https://jira.example.com"
+  username: "jira_user"
+  password: "jira_password"
+
 confluence:
   url: "https://confluence.example.com"
   username: "confluence_user"
   password: "confluence_password"
   main_page_id: "123456"
   task_result_page_id: "789012"
-```
 
-#### Jira配置
+mattermost:
+  server_url: "wss://mattermost.example.com"
+  token: "my-secret-access-token"
+  channel_id: "channel-123"
+  reconnect_interval: 5
 
-```yaml
-jira:
-  url: "https://jira.example.com"
-  username: "jira_user"
-  password: "jira_password"
-```
-
-#### 调度器配置
-
-```yaml
-scheduler:
-  poll_interval: 30        # 轮询间隔(秒)
-  concurrency: 5           # 最大并发任务数
-  coalesce: false          # 是否合并延迟任务
-  max_instances: 5         # 最大实例数
-```
-
-#### 日志配置
-
-```yaml
-log:
-  level: INFO              # 日志级别
-  filename: logs/app.log   # 日志文件路径
-  max_bytes: 10485760      # 单个日志文件大小上限(10MB)
-  backup_count: 5          # 保留日志文件数量
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-```
-
-#### 存储配置
-
-```yaml
-storage:
-  path: "task_storage"     # 任务存储路径
-```
-
-#### 报告配置
-
-```yaml
 reporting:
-  interval: 30             # 报告生成间隔(秒)
+  interval: 30
   report_types:
     - "confluence"
     - "mattermost"
@@ -207,184 +243,109 @@ reporting:
     template: "task_results_template"
 ```
 
-## 5. 安装与部署
+## 6. 部署指南
 
-### 5.1 环境准备
+### 6.1 环境要求
+- Go 1.23.1+
+- 配置文件 config.yaml
 
+### 6.2 构建步骤
+```bash
+# 1. 克隆代码
+git clone [repository_url]
 
-### 5.2 配置修改
+# 2. 进入项目目录
+cd go-demo
 
-1. 复制并修改配置文件
-   ```bash
-   cp config.yaml.example config.yaml
-   # 编辑config.yaml，填入实际环境的配置信息
-   ```
+# 3. 安装依赖
+go mod download
 
-2. 创建必要的目录
-   ```bash
-   mkdir -p logs task_storage jira_reports
-   ```
+# 4. 构建项目
+go build -o scheduler
 
-### 5.3 运行应用
+# 5. 运行服务
+./scheduler
+```
 
+### 6.3 配置说明
+1. 复制配置模板
+```bash
+cp config.yaml.example config.yaml
+```
 
-### 5.4 访问API
+2. 修改配置文件
+- 设置外部系统连接信息
+- 配置调度器参数
+- 设置报告生成选项
 
-应用启动后，可通过以下URL访问：
+## 7. 扩展开发指南
 
-- API文档：http://localhost:8000/docs
-- 任务列表：http://localhost:8000/tasks
-- 任务历史：http://localhost:8000/task_history
+### 7.1 添加新的任务类型
+1. 在 `models/task.go` 中添加新的任务类型常量
+2. 在 `scheduler/executor.go` 中实现任务处理逻辑
+3. 更新配置文件和文档
 
-## 6. 使用指南
+### 7.2 添加新的报告类型
+1. 实现 `ReportingStrategy` 接口
+2. 在 `service/result_reporting_service.go` 中注册新策略
+3. 更新配置文件中的 `report_types`
 
-### 6.1 创建任务示例
+### 7.3 添加新的存储实现
+1. 实现 `TaskRepository` 接口
+2. 在 `main.go` 中使用新的实现
 
-在程序中中已包含两个示例任务：
+## 8. 监控与维护
 
-```python
-# JIRA根问题提取任务
-root_ticket_task = {
-    "name": "JIRA Extraction - Root Ticket",
-    "task_type": TaskType.IMMEDIATE,
-    "tags": ["JIRA_TASK_EXP"],
-    "parameters": {
-        "jira_envs": ["env1.jira.com", "env2.jira.com"],
-        "key_type": "root_ticket",
-        "key_value": "PROJ-123",
-        "user": "johndoe"
-    }
-}
-
-# JIRA项目提取任务(每日执行)
-project_task = {
-    "name": "JIRA Extraction - Project",
-    "task_type": TaskType.IMMEDIATE,
-    "cron_expr": "0 0 * * *",  # 每天午夜执行
-    "tags": ["JIRA_TASK_EXP"],
-    "parameters": {
-        "jira_envs": ["env1.jira.com"],
-        "key_type": "project",
-        "key_value": "PROJ",
-        "user": "johndoe"
-    }
+### 8.1 健康检查
+```http
+GET /health
+Response: {
+    "status": "ok",
+    "timestamp": "2024-03-10T12:00:00Z"
 }
 ```
 
-### 6.2 任务执行流程
+### 8.2 日志说明
+- 格式：`%(asctime)s - %(name)s - %(levelname)s - %(message)s`
+- 位置：`logs/app.log`
+- 日志级别：INFO（可配置）
 
-1. 任务创建并存入TaskRepository
-2. SchedulerService周期性轮询待执行任务
-3. 根据任务类型(即时/定时)加入执行队列或创建定时作业
-4. TaskExecutor执行任务，调用相应的领域服务
-5. 执行结果存入TaskResultRepository
-6. ResultReportingService定期汇总结果并更新到Confluence
+## 9. 安全考虑
 
-### 6.3 任务参数说明
+### 9.1 配置安全
+- 敏感信息（密码、Token）应使用环境变量或加密存储
+- 生产环境配置文件权限控制
 
-任务参数(parameters)根据任务标签和类型而异：
+### 9.2 API安全
+- 添加认证机制（待实现）
+- 添加访问控制（待实现）
+- 添加请求限流（待实现）
 
-#### JIRA_TASK_EXP标签任务
+## 10. 已知限制
 
-```json
-{
-  "jira_envs": ["jira环境URL列表"],
-  "key_type": "root_ticket或project",
-  "key_value": "问题键值或项目键值",
-  "user": "执行用户"
-}
-```
+1. 当前仅支持内存存储，重启后数据丢失
+2. 外部系统集成为模拟实现
+3. 任务执行结果持久化待实现
+4. 缺少完整的错误处理机制
 
-## 7. 扩展与定制
+## 11. 后续规划
 
-### 7.1 添加新的任务处理器
+1. 添加数据持久化支持
+2. 完善外部系统集成
+3. 添加Web管理界面
+4. 实现分布式调度
+5. 增加监控告警功能
 
-1. 在domain/services/下创建新的领域服务
-2. 在application/use_cases/executor.py中注册新的处理器
-3. 参考现有标签(如JIRA_TASK_EXP)添加新的任务标签常量
+## 12. 贡献指南
 
-### 7.2 集成新的外部系统
-
-1. 在infrastructure/integration/下创建新的服务连接器
-2. 在domain/services/下创建对应的领域服务
-3. 在application/di_container.py中注册新的服务
-
-### 7.3 自定义结果报告
-
-1. 修改application/services/result_reporting_service.py
-2. 添加新的报告类型和模板
-
-## 8. 常见问题与解决方案
-
-### 8.1 任务执行超时
-
-- 检查任务timeout_seconds配置是否合理
-- 确认外部系统(如Jira)响应是否正常
-- 检查日志中的具体错误信息
-
-### 8.2 定时任务未执行
-
-- 验证cron表达式是否正确
-- 检查系统时区设置
-- 查看scheduler启动日志是否正常
-
-### 8.3 结果未更新到Confluence
-
-- 检查Confluence配置(URL、用户名、密码)
-- 验证page_id是否正确
-- 检查用户权限是否足够
-
-## 9. 开发规范
-
-### 9.1 代码风格
-
-- 遵循PEP 8规范
-- 使用类型注解
-- 关键函数添加文档注释
-
-### 9.2 异常处理
-
-- 所有异常继承自BaseAppException
-- 领域层异常应当有明确的业务含义
-- 避免在领域层捕获基础设施异常
-
-### 9.3 日志规范
-
-- ERROR级别：影响系统运行的错误
-- WARNING级别：需要注意但不影响主流程的问题
-- INFO级别：重要操作节点信息
-- DEBUG级别：详细调试信息
-
-## 10. 未来规划
-
-### 10.1 功能增强
-
-- 支持更多外部系统集成
-- 添加Web管理界面
-- 实现分布式调度
-
-### 10.2 性能优化
-
-- 使用Redis存储任务状态
-- 实现任务执行结果的异步处理
-- 优化大量任务场景下的性能
-
-### 10.3 安全增强
-
-- API认证与授权
-- 敏感信息加密存储
-- 完善的审计日志
-
-## 11. 贡献指南
-
-1. Fork项目仓库
+1. Fork项目
 2. 创建特性分支
 3. 提交变更
 4. 提交Pull Request
 
-## 12. 许可证
+## 13. 许可证
 
-本项目采用MIT许可证。
+MIT License
 
 ---
 
