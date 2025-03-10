@@ -1,8 +1,22 @@
+environment: "development"
+
 scheduler:
   poll_interval: 30
-  concurrency: 100
+  concurrency: 5
   coalesce: false
   max_instances: 5
+
+jira:
+  url: "https://jira.example.com"
+  username: "jira_user"
+  password: "jira_password"
+
+confluence:
+  url: "https://confluence.example.com"
+  username: "confluence_user"
+  password: "confluence_password"
+  main_page_id: "123456"
+  task_result_page_id: "789012"
 
 mattermost:
   server_url: "wss://mattermost.example.com"
@@ -16,3 +30,6 @@ log:
   max_bytes: 10485760
   backup_count: 5
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+storage:
+  path: "task_storage"

@@ -1,46 +1,184 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"my-scheduler-go/internal/api"
 	"my-scheduler-go/internal/config"
+	"my-scheduler-go/internal/models"
 	"my-scheduler-go/internal/repository"
 	"my-scheduler-go/internal/scheduler"
 )
 
 func main() {
-	// 1. 加载配置
+	// 1. Load configuration
 	appConfig, err := config.LoadConfig("config.yaml")
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// 2. (示例) 初始化日志（这里用标准库log做简单示例）
-	log.Println("[main] Starting My Scheduler Go...")
+	// 2. Setup logging
+	setupLogging(appConfig)
+	log.Println("[main] Starting APScheduler Task Management System...")
 
-	// 3. 初始化存储 (In-Memory)
+	// 3. Initialize task repository
 	repo := repository.NewInMemoryTaskRepository()
-	log.Println("[main] In-memory TaskRepository initialized.")
+	log.Println("[main] Task repository initialized")
 
-	// 4. 初始化执行器
+	// 4. Initialize task executor
 	executor := scheduler.NewTaskExecutor(repo)
+	log.Println("[main] Task executor initialized")
 
-	// 5. 创建调度服务
+	// 5. Create scheduler service
 	pollInterval := time.Duration(appConfig.Scheduler.PollInterval) * time.Second
 	schedService := scheduler.NewSchedulerService(repo, executor, pollInterval)
-	schedService.Start()
-	defer schedService.Stop()
-	log.Println("[main] SchedulerService started.")
 
-	// 6. 启动 HTTP 服务
-	router := api.SetupRouter(repo)
-	port := ":8000"
-	log.Printf("[main] Starting HTTP server on %s\n", port)
-	if err := http.ListenAndServe(port, router); err != nil {
-		log.Fatalf("HTTP server failed: %v", err)
+	// Set max concurrency from config
+	schedService.SetMaxConcurrency(appConfig.Scheduler.Concurrency)
+
+	// Start scheduler service
+	schedService.Start()
+	log.Println("[main] Scheduler service started")
+
+	// 6. Create example tasks if in development mode
+	if appConfig.Environment == "development" {
+		createExampleTasks(schedService)
 	}
-	log.Println("[main] My Scheduler Go shutdown gracefully.")
+
+	// 7. Setup HTTP server with API routes
+	router := api.SetupRouter(repo, schedService)
+
+	// Create HTTP server
+	server := &http.Server{
+		Addr:    ":8000",
+		Handler: router,
+	}
+
+	// 8. Start HTTP server in a separate goroutine
+	go func() {
+		log.Printf("[main] HTTP server listening on %s\n", server.Addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	// 9. Setup graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("[main] Shutdown signal received, stopping services...")
+
+	// 10. Shutdown services gracefully
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Stop scheduler
+	schedService.Stop()
+	log.Println("[main] Scheduler service stopped")
+
+	// Shutdown HTTP server
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server shutdown error: %v", err)
+	}
+	log.Println("[main] HTTP server stopped")
+
+	log.Println("[main] APScheduler Task Management System shutdown complete")
+}
+
+// setupLogging configures the application logging
+func setupLogging(appConfig *config.AppConfig) {
+	// For this example, we're using the standard log package
+	// In a production environment, you might want to use a more robust logging solution
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	// TODO: Implement file-based logging based on config
+}
+
+// createExampleTasks creates some example tasks for development purposes
+func createExampleTasks(sched *scheduler.SchedulerService) {
+	// Example 1: Immediate JIRA task
+	jiraImmediateTask := &models.Task{
+		Name:     "JIRA Extraction - Root Ticket",
+		TaskType: models.TypeImmediate,
+		Status:   models.StatusPending,
+		Priority: models.PriorityHigh,
+		Tags:     []string{"JIRA_TASK_EXP"},
+		Parameters: map[string]interface{}{
+			"jira_envs": []string{"env1.jira.com", "env2.jira.com"},
+			"key_type":  "root_ticket",
+			"key_value": "PROJ-123",
+			"user":      "johndoe",
+		},
+	}
+
+	// Example 2: Scheduled JIRA task (daily at midnight)
+	jiraScheduledTask := &models.Task{
+		Name:     "JIRA Extraction - Project (Daily)",
+		TaskType: models.TypeScheduled,
+		CronExpr: "0 0 0 * * *", // Seconds Minutes Hours Day Month DayOfWeek
+		Status:   models.StatusPending,
+		Priority: models.PriorityMedium,
+		Tags:     []string{"JIRA_TASK_EXP"},
+		Parameters: map[string]interface{}{
+			"jira_envs": []string{"env1.jira.com"},
+			"key_type":  "project",
+			"key_value": "PROJ",
+			"user":      "johndoe",
+		},
+	}
+
+	// Example 3: Task with timeout and retry policy
+	taskWithRetry := &models.Task{
+		Name:           "Task with Timeout and Retry",
+		TaskType:       models.TypeImmediate,
+		Status:         models.StatusPending,
+		Priority:       models.PriorityLow,
+		TimeoutSeconds: 5,
+		RetryPolicy: &models.RetryPolicy{
+			MaxRetries:    3,
+			RetryDelay:    time.Second * 5,
+			BackoffFactor: 2.0,
+		},
+	}
+
+	// Example 4: Task with dependencies (depends on Example 1)
+	dependentTask := &models.Task{
+		Name:         "Dependent Task",
+		TaskType:     models.TypeImmediate,
+		Status:       models.StatusPending,
+		Priority:     models.PriorityMedium,
+		Dependencies: []string{}, // Will be populated after the first task is created
+	}
+
+	// Add tasks
+	err := sched.AddTask(jiraImmediateTask)
+	if err != nil {
+		log.Printf("[main] Failed to add example task 1: %v", err)
+	} else {
+		// Update dependent task to depend on the first task
+		dependentTask.Dependencies = []string{jiraImmediateTask.ID}
+	}
+
+	err = sched.AddTask(jiraScheduledTask)
+	if err != nil {
+		log.Printf("[main] Failed to add example task 2: %v", err)
+	}
+
+	err = sched.AddTask(taskWithRetry)
+	if err != nil {
+		log.Printf("[main] Failed to add example task 3: %v", err)
+	}
+
+	err = sched.AddTask(dependentTask)
+	if err != nil {
+		log.Printf("[main] Failed to add example task 4: %v", err)
+	}
+
+	log.Println("[main] Example tasks created")
 }

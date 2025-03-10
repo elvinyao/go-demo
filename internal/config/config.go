@@ -6,8 +6,12 @@ import (
 	"github.com/spf13/viper"
 )
 
-// AppConfig 结构体示例，用于映射 config.yaml
+// AppConfig structure for config.yaml
 type AppConfig struct {
+	// Environment - environment mode (development, production, test)
+	Environment string `mapstructure:"environment"`
+
+	// Scheduler configuration
 	Scheduler struct {
 		PollInterval int  `mapstructure:"poll_interval"`
 		Concurrency  int  `mapstructure:"concurrency"`
@@ -15,6 +19,23 @@ type AppConfig struct {
 		MaxInstances int  `mapstructure:"max_instances"`
 	} `mapstructure:"scheduler"`
 
+	// Jira configuration
+	Jira struct {
+		URL      string `mapstructure:"url"`
+		Username string `mapstructure:"username"`
+		Password string `mapstructure:"password"`
+	} `mapstructure:"jira"`
+
+	// Confluence configuration
+	Confluence struct {
+		URL         string `mapstructure:"url"`
+		Username    string `mapstructure:"username"`
+		Password    string `mapstructure:"password"`
+		MainPageID  string `mapstructure:"main_page_id"`
+		ResultsPage string `mapstructure:"task_result_page_id"`
+	} `mapstructure:"confluence"`
+
+	// Mattermost configuration
 	Mattermost struct {
 		ServerURL         string `mapstructure:"server_url"`
 		Token             string `mapstructure:"token"`
@@ -22,6 +43,7 @@ type AppConfig struct {
 		ReconnectInterval int    `mapstructure:"reconnect_interval"`
 	} `mapstructure:"mattermost"`
 
+	// Log configuration
 	Log struct {
 		Level       string `mapstructure:"level"`
 		Filename    string `mapstructure:"filename"`
@@ -29,9 +51,14 @@ type AppConfig struct {
 		BackupCount int    `mapstructure:"backup_count"`
 		Format      string `mapstructure:"format"`
 	} `mapstructure:"log"`
+
+	// Storage configuration
+	Storage struct {
+		Path string `mapstructure:"path"`
+	} `mapstructure:"storage"`
 }
 
-// LoadConfig 示例方法
+// LoadConfig loads configuration from the specified file path
 func LoadConfig(path string) (*AppConfig, error) {
 	viper.SetConfigFile(path)
 	if err := viper.ReadInConfig(); err != nil {
@@ -41,6 +68,11 @@ func LoadConfig(path string) (*AppConfig, error) {
 	var cfg AppConfig
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, err
+	}
+
+	// Set default values if not specified
+	if cfg.Environment == "" {
+		cfg.Environment = "development"
 	}
 
 	fmt.Println("[config] Loaded config from:", path)
