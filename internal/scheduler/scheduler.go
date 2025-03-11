@@ -226,7 +226,7 @@ func (s *SchedulerService) executeTask(task *models.Task) {
 	s.runningMutex.Unlock()
 
 	// Execute
-	s.executor.ExecuteTask(task.ID)
+	s.executor.ExecuteTask(task)
 
 	// Remove from running tasks
 	s.runningMutex.Lock()

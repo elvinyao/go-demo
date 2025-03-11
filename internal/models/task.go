@@ -45,6 +45,8 @@ type Task struct {
 	Status          TaskStatus             `json:"status"`
 	CreatedAt       time.Time              `json:"created_at"`
 	UpdatedAt       time.Time              `json:"updated_at"`
+	StartTime       time.Time              `json:"start_time,omitempty"`
+	EndTime         time.Time              `json:"end_time,omitempty"`
 	Priority        TaskPriority           `json:"priority"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
 	Tags            []string               `json:"tags,omitempty"`
@@ -54,6 +56,8 @@ type Task struct {
 	RetryPolicy     *RetryPolicy           `json:"retry_policy,omitempty"`
 	Parameters      map[string]interface{} `json:"parameters,omitempty"`
 	ExecutionResult map[string]interface{} `json:"execution_result,omitempty"`
+	RetryCount      int                    `json:"retry_count,omitempty"`
+	NextRunAt       time.Time              `json:"next_run_at,omitempty"`
 }
 
 func (t *Task) UpdateStatus(newStatus TaskStatus) {

@@ -11,6 +11,7 @@ import (
 
 	"my-scheduler-go/internal/api"
 	"my-scheduler-go/internal/config"
+	"my-scheduler-go/internal/mattermost"
 	"my-scheduler-go/internal/models"
 	"my-scheduler-go/internal/repository"
 	"my-scheduler-go/internal/scheduler"
@@ -18,55 +19,110 @@ import (
 )
 
 func main() {
-	// 1. Load configuration
+	// 1. 加载配置
 	appConfig, err := config.LoadConfig("config.yaml")
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// 2. Setup logging
+	// 2. 设置日志
 	setupLogging(appConfig)
 	log.Println("[main] Starting APScheduler Task Management System...")
 
-	// 3. Initialize task repository
+	// 3. 初始化任务仓库
 	repo := repository.NewInMemoryTaskRepository()
 	log.Println("[main] Task repository initialized")
 
-	// 4. Initialize task executor
+	// 4. 初始化任务执行器
 	executor := scheduler.NewTaskExecutor(repo)
 	log.Println("[main] Task executor initialized")
 
-	// 5. Create scheduler service
+	// 5. 创建调度服务
 	pollInterval := time.Duration(appConfig.Scheduler.PollInterval) * time.Second
 	schedService := scheduler.NewSchedulerService(repo, executor, pollInterval)
 
-	// Set max concurrency from config
+	// 设置最大并发度
 	schedService.SetMaxConcurrency(appConfig.Scheduler.Concurrency)
 
-	// Start scheduler service
+	// 6. 初始化Mattermost服务
+	mattermostService := service.NewMattermostService(appConfig)
+	log.Println("[main] Mattermost service initialized")
+
+	// 7. 初始化Confluence服务
+	confluenceService := service.NewConfluenceService(appConfig)
+	log.Println("[main] Confluence service initialized")
+
+	// 8. 创建配置获取器
+	useMockData := appConfig.Environment == "development"
+	configFetcher := service.NewConfluenceConfigFetcher(confluenceService, appConfig, useMockData)
+	log.Println("[main] Configuration fetcher initialized")
+
+	// 9. 创建配置服务 (每180秒更新一次配置)
+	configService := scheduler.NewConfigurationService(configFetcher, 180*time.Second)
+	log.Println("[main] Configuration service initialized")
+
+	// 10. 创建Mattermost事件监听器
+	eventListener := mattermostService.CreateEventListener(useMockData)
+	log.Println("[main] Mattermost event listener created")
+
+	// 11. 添加事件过滤器
+	mattermostService.AddChannelFilter(eventListener, []string{appConfig.Mattermost.ChannelID})
+	mattermostService.AddEventTypeFilter(eventListener, []mattermost.EventType{
+		mattermost.EventTypePosted,
+		mattermost.EventTypeUserAdded,
+	})
+	log.Println("[main] Event filters configured")
+
+	// 12. 创建Mattermost事件源
+	eventSource := scheduler.NewMattermostEventSource(repo, eventListener, configService)
+	log.Println("[main] Mattermost event source created")
+
+	// 13. 注册事件处理器
+	eventSource.RegisterProcessor("posted_messages", scheduler.NewPostedMessageProcessor([]string{
+		"task", "schedule", "urgent", "important",
+	}))
+	eventSource.RegisterProcessor("user_added", scheduler.NewUserAddedProcessor())
+	log.Println("[main] Event processors registered")
+
+	// 14. 创建Mattermost任务处理器，但目前暂不使用
+	// 在完整实现中，这里会注册任务处理器到执行器
+	_ = service.NewMattermostTaskHandler(mattermostService, appConfig)
+	log.Println("[main] Mattermost task handler created")
+
+	// 15. 任务处理器配置
+	log.Println("[main] Task handlers configured")
+
+	// 16. 启动各服务
+	configService.Start()
+	log.Println("[main] Configuration service started")
+
+	eventSource.Start()
+	log.Println("[main] Mattermost event source started")
+
+	// 启动调度服务
 	schedService.Start()
 	log.Println("[main] Scheduler service started")
 
-	// 6. Initialize and start result reporting service
+	// 17. 初始化并启动结果报告服务
 	reportingService := service.NewResultReportingService(repo, appConfig)
 	reportingService.Start()
 	log.Println("[main] Result reporting service started")
 
-	// 7. Create example tasks if in development mode
+	// 18. 开发模式下创建示例任务
 	if appConfig.Environment == "development" {
 		createExampleTasks(schedService)
 	}
 
-	// 8. Setup HTTP server with API routes
+	// 19. 设置HTTP服务器和API路由
 	router := api.SetupRouter(repo, schedService, reportingService)
 
-	// Create HTTP server
+	// 创建HTTP服务器
 	server := &http.Server{
 		Addr:    ":8000",
 		Handler: router,
 	}
 
-	// 9. Start HTTP server in a separate goroutine
+	// 20. 在独立的goroutine中启动HTTP服务器
 	go func() {
 		log.Printf("[main] HTTP server listening on %s\n", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -74,25 +130,33 @@ func main() {
 		}
 	}()
 
-	// 10. Setup graceful shutdown
+	// 21. 设置优雅关闭
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("[main] Shutdown signal received, stopping services...")
 
-	// 11. Shutdown services gracefully
+	// 22. 优雅关闭服务
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Stop reporting service
+	// 停止事件源
+	eventSource.Stop()
+	log.Println("[main] Mattermost event source stopped")
+
+	// 停止配置服务
+	configService.Stop()
+	log.Println("[main] Configuration service stopped")
+
+	// 停止报告服务
 	reportingService.Stop()
 	log.Println("[main] Result reporting service stopped")
 
-	// Stop scheduler
+	// 停止调度器
 	schedService.Stop()
 	log.Println("[main] Scheduler service stopped")
 
-	// Shutdown HTTP server
+	// 关闭HTTP服务器
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Server shutdown error: %v", err)
 	}
@@ -101,93 +165,60 @@ func main() {
 	log.Println("[main] APScheduler Task Management System shutdown complete")
 }
 
-// setupLogging configures the application logging
+// setupLogging 配置应用日志
 func setupLogging(appConfig *config.AppConfig) {
-	// For this example, we're using the standard log package
-	// In a production environment, you might want to use a more robust logging solution
+	// 这个例子使用标准log包
+	// 在生产环境中，您可能需要使用更健壮的日志解决方案
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
-	// TODO: Implement file-based logging based on config
+	// TODO: 根据配置实现基于文件的日志记录
 }
 
-// createExampleTasks creates some example tasks for development purposes
+// createExampleTasks 创建一些示例任务用于开发目的
 func createExampleTasks(sched *scheduler.SchedulerService) {
-	// Example 1: Immediate JIRA task
-	jiraImmediateTask := &models.Task{
-		Name:     "JIRA Extraction - Root Ticket",
+	// Example 1: 即时Mattermost任务
+	mattermostTask := &models.Task{
+		Name:     "Mattermost消息处理示例",
 		TaskType: models.TypeImmediate,
 		Status:   models.StatusPending,
 		Priority: models.PriorityHigh,
-		Tags:     []string{"JIRA_TASK_EXP"},
+		Tags:     []string{"MATTERMOST"},
 		Parameters: map[string]interface{}{
-			"jira_envs": []string{"env1.jira.com", "env2.jira.com"},
-			"key_type":  "root_ticket",
-			"key_value": "PROJ-123",
-			"user":      "johndoe",
+			"channel_id":   "channel1",
+			"message":      "这是一条测试消息",
+			"forward_type": "notification",
+			"event_type":   "posted",
+			"channel_name": "测试频道",
+			"username":     "测试用户",
+			"notify_admin": "true",
 		},
 	}
 
-	// Example 2: Scheduled JIRA task (daily at midnight)
-	jiraScheduledTask := &models.Task{
-		Name:     "JIRA Extraction - Project (Daily)",
+	// Example 2: 定时Mattermost任务
+	mattermostScheduledTask := &models.Task{
+		Name:     "Mattermost定时通知示例",
 		TaskType: models.TypeScheduled,
-		CronExpr: "0 0 0 * * *", // Seconds Minutes Hours Day Month DayOfWeek
+		CronExpr: "0 0 9 * * *", // 每天早上9点
 		Status:   models.StatusPending,
 		Priority: models.PriorityMedium,
-		Tags:     []string{"JIRA_TASK_EXP"},
+		Tags:     []string{"MATTERMOST"},
 		Parameters: map[string]interface{}{
-			"jira_envs": []string{"env1.jira.com"},
-			"key_type":  "project",
-			"key_value": "PROJ",
-			"user":      "johndoe",
+			"channel_id":        "channel1",
+			"message":           "这是一条定时发送的通知",
+			"forward_type":      "channel_message",
+			"target_channel_id": "channel456",
 		},
 	}
 
-	// Example 3: Task with timeout and retry policy
-	taskWithRetry := &models.Task{
-		Name:           "Task with Timeout and Retry",
-		TaskType:       models.TypeImmediate,
-		Status:         models.StatusPending,
-		Priority:       models.PriorityLow,
-		TimeoutSeconds: 5,
-		RetryPolicy: &models.RetryPolicy{
-			MaxRetries:    3,
-			RetryDelay:    time.Second * 5,
-			BackoffFactor: 2.0,
-		},
-	}
-
-	// Example 4: Task with dependencies (depends on Example 1)
-	dependentTask := &models.Task{
-		Name:         "Dependent Task",
-		TaskType:     models.TypeImmediate,
-		Status:       models.StatusPending,
-		Priority:     models.PriorityMedium,
-		Dependencies: []string{}, // Will be populated after the first task is created
-	}
-
-	// Add tasks
-	err := sched.AddTask(jiraImmediateTask)
+	// 添加任务
+	err := sched.AddTask(mattermostTask)
 	if err != nil {
 		log.Printf("[main] Failed to add example task 1: %v", err)
-	} else {
-		// Update dependent task to depend on the first task
-		dependentTask.Dependencies = []string{jiraImmediateTask.ID}
 	}
 
-	err = sched.AddTask(jiraScheduledTask)
+	err = sched.AddTask(mattermostScheduledTask)
 	if err != nil {
 		log.Printf("[main] Failed to add example task 2: %v", err)
-	}
-
-	err = sched.AddTask(taskWithRetry)
-	if err != nil {
-		log.Printf("[main] Failed to add example task 3: %v", err)
-	}
-
-	err = sched.AddTask(dependentTask)
-	if err != nil {
-		log.Printf("[main] Failed to add example task 4: %v", err)
 	}
 
 	log.Println("[main] Example tasks created")
